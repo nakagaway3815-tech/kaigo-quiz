@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import random
-import streamlit.components.v1 as components
+import streamlit.components.v1 as components # ここが重要です
 
-# --- 1. 音声読み上げ用のJavaScript関数（改良版） ---
-def speak_text(text, key):
-    # speechSynthesis.cancel() を入れることで、前回の音声を止めてから新しく再生します。
-    # また、components.html に毎回異なる key を渡すことで、Streamlitに「新しい実行」だと認識させます。
+# --- 1. 音声読み上げ用のJavaScript関数 ---
+def speak_text(text, voice_key):
+    # JavaScriptを安全に実行するための設定
     js_code = f"""
     <script>
     (function() {{
@@ -19,7 +18,8 @@ def speak_text(text, key):
     }})();
     </script>
     """
-    components.html(js_code, height=0, key=key)
+    # st.components.v1.html を直接使う書き方に変更してエラーを防ぎます
+    st.components.v1.html(js_code, height=0, key=voice_key)
 
 # --- 2. 初期設定とデータ読み込み ---
 if "wrong_list" not in st.session_state:
@@ -41,9 +41,9 @@ if 'quiz_data' not in st.session_state:
     st.session_state.correct_count = 0
     st.session_state.current_options = []
     st.session_state.max_questions = 0
-    st.session_state.voice_trigger = 0 # 音声再生回数のカウンター
+    st.session_state.voice_trigger = 0
 
-# --- 3. 出題数選択画面（メニュー） ---
+# --- 3. 出題数選択画面 ---
 if st.session_state.quiz_data is None:
     st.title("🏥 介護用語クイズ")
     st.subheader("今日は何問解きますか？")
@@ -69,7 +69,7 @@ if st.session_state.quiz_data is None:
 df = st.session_state.quiz_data
 if st.session_state.index >= len(df):
     st.balloons()
-    st.header("🎉 終了！お疲れ様でした")
+    st.header("🎉 終了！")
     st.subheader(f"正解数: {st.session_state.correct_count} / {len(df)}")
     
     st.write("---")
@@ -78,7 +78,7 @@ if st.session_state.index >= len(df):
         for q in st.session_state.wrong_list:
             st.write(f"・ **{q}**")
     else:
-        st.success("完璧です！全問正解おめでとうございます！")
+        st.success("完璧です！")
 
     if st.button("メニューに戻る"):
         for key in list(st.session_state.keys()):
@@ -86,7 +86,7 @@ if st.session_state.index >= len(df):
         st.rerun()
     st.stop()
 
-# --- 5. クイズ画面の表示 ---
+# --- 5. クイズ画面 ---
 row = df.iloc[st.session_state.index]
 
 st.title("🏥 介護用語クイズ")
@@ -95,11 +95,10 @@ st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
 
 st.info(f"「**{row['用語']}**」はどういう意味ですか？")
 
-# 【改良版】音声読み上げボタン
-# クリックするたびにカウンターを増やすことで、何度でも再生可能にしています
+# ボタン部分：keyの名前をシンプルにしました
 if st.button("🔊 用語を読み上げる"):
     st.session_state.voice_trigger += 1
-    speak_text(row['用語'], f"voice_exec_{st.session_state.voice_trigger}")
+    speak_text(row['用語'], f"v_{st.session_state.index}_{st.session_state.voice_trigger}")
 
 if not st.session_state.answered and not st.session_state.current_options:
     options = [row['正しい意味'], row['不正解1'], row['不正解2']]
@@ -116,16 +115,15 @@ if not st.session_state.answered:
             st.session_state.answered = True
             st.rerun()
 
-# --- 6. 回答後の判定と解説 ---
+# --- 6. 回答後の処理 ---
 if st.session_state.answered:
     if choice == row['正しい意味']:
-        st.success("⭕ 正解です！ (Benar!)")
+        st.success("⭕ 正解です！")
         if 'last_counted' not in st.session_state or st.session_state.last_counted != st.session_state.index:
             st.session_state.correct_count += 1
             st.session_state.last_counted = st.session_state.index
     else:
-        st.error(f"❌ 残念！ (Salah)")
-        st.write(f"正解は： **{row['正しい意味']}**")
+        st.error(f"❌ 残念！ 正解は： **{row['正しい意味']}**")
         if row['用語'] not in st.session_state.wrong_list:
             st.session_state.wrong_list.append(row['用語'])
 
@@ -143,5 +141,5 @@ if st.session_state.answered:
         st.session_state.index += 1
         st.session_state.answered = False
         st.session_state.current_options = []
-        st.session_state.voice_trigger = 0 # カウンターをリセット
+        st.session_state.voice_trigger = 0
         st.rerun()
