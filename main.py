@@ -1,11 +1,9 @@
 import streamlit as st
 import pandas as pd
 import random
-import streamlit.components.v1 as components # ここが重要です
 
-# --- 1. 音声読み上げ用のJavaScript関数 ---
+# --- 1. 音声読み上げ用のJavaScript関数（より安定した書き方に変更） ---
 def speak_text(text, voice_key):
-    # JavaScriptを安全に実行するための設定
     js_code = f"""
     <script>
     (function() {{
@@ -18,8 +16,9 @@ def speak_text(text, voice_key):
     }})();
     </script>
     """
-    # st.components.v1.html を直接使う書き方に変更してエラーを防ぎます
-    st.components.v1.html(js_code, height=0, key=voice_key)
+    # st.components.v1.html ではなく st.html または components.html を使います
+    from streamlit.components.v1 import html
+    html(js_code, height=0, key=voice_key)
 
 # --- 2. 初期設定とデータ読み込み ---
 if "wrong_list" not in st.session_state:
@@ -95,9 +94,10 @@ st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
 
 st.info(f"「**{row['用語']}**」はどういう意味ですか？")
 
-# ボタン部分：keyの名前をシンプルにしました
+# ボタン部分
 if st.button("🔊 用語を読み上げる"):
     st.session_state.voice_trigger += 1
+    # 関数内で読み込みを行うことで TypeError を回避します
     speak_text(row['用語'], f"v_{st.session_state.index}_{st.session_state.voice_trigger}")
 
 if not st.session_state.answered and not st.session_state.current_options:
