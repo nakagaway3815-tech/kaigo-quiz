@@ -3,17 +3,32 @@ import pandas as pd
 import random
 from gtts import gTTS
 import io
+import gspread
+from google.oauth2.service_account import Credentials
 
-# --- 1. 音声読み上げ用の関数（gTTS版：最も確実です） ---
+# --- 1. 音声読み上げ用の関数 ---
 def speak_text(text):
-    # Googleの音声合成を使って音声データを作成
     tts = gTTS(text=text, lang='ja')
     fp = io.BytesIO()
     tts.write_to_fp(fp)
-    # Streamlit標準のオーディオプレイヤーで再生（自動再生をオンに）
     st.audio(fp, format='audio/mp3', autoplay=True)
 
-# --- 2. 初期設定とデータ読み込み ---
+# --- 2. スプレッドシート保存用の関数 ---
+def save_to_spreadsheet(text):
+    # 認証スコープの設定
+    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    
+    # Streamlit Secretsから認証情報を取得
+    # ※GitHubに鍵を直接書かないためのセキュリティ対策
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+
+    # 指定したスプレッドシートを開く（※名前を自分のシート名に合わせてください）
+    sheet = client.open("介護アプリフィードバック").sheet1
+    sheet.append_row([pd.Timestamp.now(tz='Asia/Tokyo').strftime('%Y-%m-%d %H:%M:%S'), text])
+
+# --- 3. 初期設定とデータ読み込み ---
 if "wrong_list" not in st.session_state:
     st.session_state.wrong_list = []
 
@@ -25,7 +40,26 @@ def load_data():
 
 all_df = load_data()
 
-# セッション状態の初期化
+# --- 4. サイドバー（フィードバック送信欄） ---
+with st.sidebar:
+    st.header("💡 フィードバック")
+    st.write("改善案や追加してほしい用語を教えてください。")
+    
+    # 入力欄を先に定義します
+    feedback_input = st.text_area("内容を入力してください", key="feedback_area")
+    
+    if st.button("フィードバックを送信"):
+        if feedback_input:
+            try:
+                save_to_spreadsheet(feedback_input)
+                st.success("ありがとうございます！送信されました。")
+            except Exception as e:
+                st.error("送信に失敗しました。設定を確認してください。")
+                # print(e) # デバッグ用にエラー詳細を表示する場合
+        else:
+            st.warning("内容を入力してください。")
+
+# --- 5. セッション状態の初期化 ---
 if 'quiz_data' not in st.session_state:
     st.session_state.quiz_data = None
     st.session_state.index = 0
@@ -34,7 +68,7 @@ if 'quiz_data' not in st.session_state:
     st.session_state.current_options = []
     st.session_state.max_questions = 0
 
-# --- 3. 出題数選択画面 ---
+# --- 6. 出題数選択画面 ---
 if st.session_state.quiz_data is None:
     st.title("🏥 介護用語クイズ")
     st.subheader("今日は何問解きますか？")
@@ -56,7 +90,7 @@ if st.session_state.quiz_data is None:
         st.rerun()
     st.stop()
 
-# --- 4. 全問題終了後の画面 ---
+# --- 7. 全問題終了後の画面 ---
 df = st.session_state.quiz_data
 if st.session_state.index >= len(df):
     st.balloons()
@@ -77,7 +111,7 @@ if st.session_state.index >= len(df):
         st.rerun()
     st.stop()
 
-# --- 5. クイズ画面 ---
+# --- 8. クイズ画面 ---
 row = df.iloc[st.session_state.index]
 
 st.title("🏥 介護用語クイズ")
@@ -86,7 +120,6 @@ st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
 
 st.info(f"「**{row['用語']}**」はどういう意味ですか？")
 
-# ボタン部分：gTTSで音声を生成して再生
 if st.button("🔊 用語を読み上げる"):
     speak_text(row['用語'])
 
@@ -105,7 +138,7 @@ if not st.session_state.answered:
             st.session_state.answered = True
             st.rerun()
 
-# --- 6. 回答後の処理 ---
+# --- 9. 回答後の判定と解説 ---
 if st.session_state.answered:
     if choice == row['正しい意味']:
         st.success("⭕ 正解です！")
