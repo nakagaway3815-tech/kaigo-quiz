@@ -1,1 +1,3 @@
 gTTS
+gspread
+google-auth
