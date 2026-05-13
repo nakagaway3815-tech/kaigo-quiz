@@ -5,16 +5,20 @@ import streamlit.components.v1 as components
 
 # --- 1. 音声読み上げ用のJavaScript関数 ---
 def speak_text(text):
-    # ブラウザのSpeech APIを利用して日本語を再生する
+    # 重複再生を避け、かつ何度でも呼び出せるように少し工夫したJavaScript
     js_code = f"""
     <script>
-    var msg = new SpeechSynthesisUtterance();
-    msg.text = "{text}";
-    msg.lang = 'ja-JP';
-    msg.rate = 1.0;
-    window.speechSynthesis.speak(msg);
+    (function() {{
+        window.speechSynthesis.cancel(); // 今喋っているのを止める（連打対策）
+        var msg = new SpeechSynthesisUtterance();
+        msg.text = "{text}";
+        msg.lang = 'ja-JP';
+        msg.rate = 1.0;
+        window.speechSynthesis.speak(msg);
+    }})();
     </script>
     """
+    # ユニークなキーを与えることで、Streamlitが「新しい命令」として認識しやすくなります
     components.html(js_code, height=0)
 
 # --- 2. 初期設定とデータ読み込み ---
