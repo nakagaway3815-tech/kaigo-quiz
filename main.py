@@ -2,23 +2,24 @@ import streamlit as st
 import pandas as pd
 import random
 
-# --- 1. 音声読み上げ用のJavaScript関数（より安定した書き方に変更） ---
-def speak_text(text, voice_key):
+# --- 1. 音声読み上げ用の関数（エラーを回避するMarkdown版） ---
+def speak_text(text):
+    # components.html を使わずに、Markdown経由でJavaScriptを注入します
+    # これにより TypeError を物理的に回避します
     js_code = f"""
-    <script>
-    (function() {{
-        window.speechSynthesis.cancel();
-        var msg = new SpeechSynthesisUtterance();
-        msg.text = "{text}";
-        msg.lang = 'ja-JP';
-        msg.rate = 1.0;
-        window.speechSynthesis.speak(msg);
-    }})();
-    </script>
+        <div id="voice-trigger"></div>
+        <script>
+            (function() {{
+                window.speechSynthesis.cancel();
+                var msg = new SpeechSynthesisUtterance();
+                msg.text = "{text}";
+                msg.lang = 'ja-JP';
+                msg.rate = 1.0;
+                window.speechSynthesis.speak(msg);
+            }})();
+        </script>
     """
-    # st.components.v1.html ではなく st.html または components.html を使います
-    from streamlit.components.v1 import html
-    html(js_code, height=0, key=voice_key)
+    st.markdown(js_code, unsafe_allow_html=True)
 
 # --- 2. 初期設定とデータ読み込み ---
 if "wrong_list" not in st.session_state:
@@ -40,7 +41,6 @@ if 'quiz_data' not in st.session_state:
     st.session_state.correct_count = 0
     st.session_state.current_options = []
     st.session_state.max_questions = 0
-    st.session_state.voice_trigger = 0
 
 # --- 3. 出題数選択画面 ---
 if st.session_state.quiz_data is None:
@@ -94,11 +94,9 @@ st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
 
 st.info(f"「**{row['用語']}**」はどういう意味ですか？")
 
-# ボタン部分
+# ボタン部分：もっともシンプルな仕組みに変更
 if st.button("🔊 用語を読み上げる"):
-    st.session_state.voice_trigger += 1
-    # 関数内で読み込みを行うことで TypeError を回避します
-    speak_text(row['用語'], f"v_{st.session_state.index}_{st.session_state.voice_trigger}")
+    speak_text(row['用語'])
 
 if not st.session_state.answered and not st.session_state.current_options:
     options = [row['正しい意味'], row['不正解1'], row['不正解2']]
@@ -141,5 +139,4 @@ if st.session_state.answered:
         st.session_state.index += 1
         st.session_state.answered = False
         st.session_state.current_options = []
-        st.session_state.voice_trigger = 0
         st.rerun()
