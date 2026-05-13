@@ -1,25 +1,17 @@
 import streamlit as st
 import pandas as pd
 import random
+from gtts import gTTS
+import io
 
-# --- 1. 音声読み上げ用の関数（エラーを回避するMarkdown版） ---
+# --- 1. 音声読み上げ用の関数（gTTS版：最も確実です） ---
 def speak_text(text):
-    # components.html を使わずに、Markdown経由でJavaScriptを注入します
-    # これにより TypeError を物理的に回避します
-    js_code = f"""
-        <div id="voice-trigger"></div>
-        <script>
-            (function() {{
-                window.speechSynthesis.cancel();
-                var msg = new SpeechSynthesisUtterance();
-                msg.text = "{text}";
-                msg.lang = 'ja-JP';
-                msg.rate = 1.0;
-                window.speechSynthesis.speak(msg);
-            }})();
-        </script>
-    """
-    st.markdown(js_code, unsafe_allow_html=True)
+    # Googleの音声合成を使って音声データを作成
+    tts = gTTS(text=text, lang='ja')
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    # Streamlit標準のオーディオプレイヤーで再生（自動再生をオンに）
+    st.audio(fp, format='audio/mp3', autoplay=True)
 
 # --- 2. 初期設定とデータ読み込み ---
 if "wrong_list" not in st.session_state:
@@ -94,7 +86,7 @@ st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
 
 st.info(f"「**{row['用語']}**」はどういう意味ですか？")
 
-# ボタン部分：もっともシンプルな仕組みに変更
+# ボタン部分：gTTSで音声を生成して再生
 if st.button("🔊 用語を読み上げる"):
     speak_text(row['用語'])
 
