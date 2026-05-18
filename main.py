@@ -40,8 +40,9 @@ def save_consultation(name, category, content):
             credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
             gc = gspread.authorize(credentials)
             
-            workbook = gc.open("介護アプリ管理シート")
-            worksheet = workbook.worksheet("相談・提案窓口")
+            workbook = gc.open("相談・提案窓口")  # ←ファイル名をこちらに変更します
+            # スプレッドシートの一番最初のタブ（シート1など）を指定する場合、以下のようにすると確実です
+            worksheet = workbook.get_worksheet(0)
             
             worksheet.append_row(new_data)
             return True, "スプレッドシートへの保存に成功しました！"
