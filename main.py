@@ -40,19 +40,20 @@ def save_consultation(name, category, content):
             credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
             gc = gspread.authorize(credentials)
             
-            workbook = gc.open("相談・提案窓口")  # ←ファイル名をこちらに変更します
-            # スプレッドシートの一番最初のタブ（シート1など）を指定する場合、以下のようにすると確実です
+            # 【重要】スプレッドシート名を「相談・提案窓口」に変更
+            workbook = gc.open("相談・提案窓口")
+            # 一番最初のワークシートを指定
             worksheet = workbook.get_worksheet(0)
             
             worksheet.append_row(new_data)
             return True, "スプレッドシートへの保存に成功しました！"
         else:
-            return False, "Streamlit Secretsに認証情報（gcp_service_account）が見つかりません。ローカルCSVに保存します。"
+            return False, "Streamlit Secretsに認証情報（gcp_service_account）が見つかりません。Secretsの設定を確認してください。"
     except Exception as e:
-        # 面接やデバッグで役立つよう、画面上にエラーの原因を優しく表示する
-        return False, f"スプレッドシート接続エラー: {str(e)}（ローカルCSVにバックアップしました）"
+        # エラーの原因を分かりやすく画面に返す
+        return False, f"スプレッドシート接続エラー: {str(e)}"
 
-# --- 3. 音声生成・再生関数（復活） ---
+# --- 3. 音声生成・再生関数 ---
 def play_audio(text):
     try:
         tts = gTTS(text=text, lang='ja')
@@ -79,6 +80,7 @@ if "wrong_list" not in st.session_state:
 st.title("🏥 介護用語学習アプリ")
 st.subheader("外国人スタッフ向け クイズ＆サポート")
 
+# 相談フォームを表示するかどうかのフラグ
 show_form = False
 
 # --- 5. メインコンテンツ（クイズ制御） ---
@@ -86,10 +88,10 @@ show_form = False
 # 【画面A】問題数選択画面（初期状態）
 if not st.session_state.quiz_started:
     st.write("日本の介護現場でよく使う言葉を勉強しましょう。")
-    show_form = True  
+    show_form = True  # 最初の画面ではフォームを表示
     
     max_questions = len(df)
-    options = [5, 10, 20, 30]
+    options = [5, 10, 20, 30]  # 問題数の選択肢を30問までに制限
     options = [opt for opt in options if opt <= max_questions]
     if not options:
         options = [max_questions]
@@ -118,11 +120,11 @@ else:
         
         st.info(f"「**{row['用語']}**」の意味は何ですか？")
         
-        # 音声再生ボタン（問題の用語を読み上げる）
+        # 音声再生ボタン（復活）
         st.write("🔊 用語のよみをきく：")
         play_audio(row['用語'])
         
-        # やさしい日本語の表示（列名の揺れに対応）
+        # やさしい日本語の表示ロジック（復活）
         display_easy_ja = ""
         if 'やさしい日本語' in row and pd.notna(row['やさしい日本語']):
             display_easy_ja = row['やさしい日本語']
@@ -159,7 +161,7 @@ else:
     # 【画面C】全問終了・リザルト画面
     else:
         st.markdown("### 🏁 クイズ終了！")
-        show_form = True  
+        show_form = True  # クイズ終了画面でもフォームを表示
         score = st.session_state.score
         st.metric(label="あなたの正解数", value=f"{score} / {total_q}")
         
@@ -180,7 +182,7 @@ else:
             st.session_state.quiz_started = False
             st.rerun()
 
-# --- 6. 提案・相談フォーム（条件付き表示 ＆ デバッグメッセージ付き） ---
+# --- 6. 提案・相談フォーム（条件付き表示） ---
 if show_form:
     st.write("---")
     st.subheader("💬 アプリへの提案や、業務・生活の相談窓口")
@@ -205,25 +207,11 @@ if show_form:
             else:
                 final_name = name.strip() if name.strip() else "匿名"
                 
-                # スプレッドシートへの保存を試みる
+                # スプレッドシートへの保存を実行
                 success, message = save_consultation(final_name, category, content)
                 
                 if success:
                     st.success(f"⭕ {message}")
                 else:
-                    # スプレッドシートに反映されなかった場合、画面に原因（エラー文）を表示する
-                    st.warning(f"ℹ️ {message}")
-                    
-                    # バックアップとしてローカルCSVに書き込み
-                    csv_file = "consultations.csv"
-                    columns = ["タイムスタンプ", "名前（ニックネーム）", "内容の種類", "具体的な内容"]
-                    new_data = [[datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), final_name, category, content]]
-                    
-                    if os.path.exists(csv_file):
-                        consult_df = pd.read_csv(csv_file)
-                    else:
-                        consult_df = pd.DataFrame(columns=columns)
-                    
-                    new_row = pd.DataFrame(new_data, columns=columns)
-                    consult_df = pd.concat([consult_df, new_row], ignore_index=True)
-                    consult_df.to_csv(csv_file, index=False)
+                    # 失敗した場合はエラー原因を画面にオレンジ色で表示する
+                    st.warning(f"⚠️ {message}")
