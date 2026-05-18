@@ -15,7 +15,7 @@ except ImportError:
 # --- 1. データの読み込み ---
 @st.cache_data
 def load_data():
-    # 既存のdata.csvを読み込む
+    # 既存のdata.csv（クイズ問題）を読み込む
     return pd.read_csv("data.csv")
 
 try:
@@ -27,6 +27,7 @@ except Exception as e:
 # --- 2. スプレッドシート（またはローカルCSV）への書き込み関数 ---
 def save_consultation(name, category, content):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # スプレッドシートの「相談・提案窓口」シートの列順（A:タイムスタンプ, B:名前, C:種類, D:内容）に合わせる
     new_data = [timestamp, name, category, content]
 
     # Streamlit Secretsから認証情報を取得してスプレッドシートに書き込みを試みる
@@ -41,7 +42,7 @@ def save_consultation(name, category, content):
             workbook = gc.open("介護アプリ管理シート")
             worksheet = workbook.worksheet("相談・提案窓口")
             
-            # 最終行にデータを追加
+            # シートの最終行にデータを追加
             worksheet.append_row(new_data)
             return True
     except Exception as e:
@@ -196,7 +197,7 @@ else:
                 if not content.strip():
                     st.error("❌ 具体的な内容を入力してください。")
                     
-                # 「仕事、生活の相談」のときだけ名前を必須にする
+                # 「仕事、生活の相談」のときだけ名前入力を必須（空欄を禁止）にする
                 elif category == "仕事、生活の相談" and not name.strip():
                     st.error("⚠️ 「仕事、生活の相談」の場合は、必ずあなたのお名前を入力してください。")
                     
