@@ -3,6 +3,8 @@ import pandas as pd
 import random
 import datetime
 import os
+from gtts import gTTS
+import io
 
 # Googleスプレッドシート連携用ライブラリの読み込み
 try:
@@ -19,6 +21,10 @@ def load_data():
 
 try:
     df = load_data()
+    # 列名の表記揺れ対策（「やさしい日本語」でも「やさしいにほんご」でも動くようにする）
+    df.columns = [col.strip() for col in df.columns]
+    if 'やさしいにほんご' in df.columns and 'やさしい日本語' not in df.columns:
+        df = df.rename(columns={'やさしいにほんご': 'やさしい日本語'})
 except Exception as e:
     st.error("data.csv が見つからないか、形式が正しくありません。")
     st.stop()
@@ -38,25 +44,25 @@ def save_consultation(name, category, content):
             worksheet = workbook.worksheet("相談・提案窓口")
             
             worksheet.append_row(new_data)
-            return True
+            return True, "スプレッドシートへの保存に成功しました！"
+        else:
+            return False, "Streamlit Secretsに認証情報（gcp_service_account）が見つかりません。ローカルCSVに保存します。"
     except Exception as e:
-        print(f"Spreadsheet Write Error: {e}")
+        # 面接やデバッグで役立つよう、画面上にエラーの原因を優しく表示する
+        return False, f"スプレッドシート接続エラー: {str(e)}（ローカルCSVにバックアップしました）"
 
-    # 【フォールバック】ローカルのCSVに保存
-    csv_file = "consultations.csv"
-    columns = ["タイムスタンプ", "名前（ニックネーム）", "内容の種類", "具体的な内容"]
-    
-    if os.path.exists(csv_file):
-        consult_df = pd.read_csv(csv_file)
-    else:
-        consult_df = pd.DataFrame(columns=columns)
-        
-    new_row = pd.DataFrame([new_data], columns=columns)
-    consult_df = pd.concat([consult_df, new_row], ignore_index=True)
-    consult_df.to_csv(csv_file, index=False)
-    return True
+# --- 3. 音声生成・再生関数（復活） ---
+def play_audio(text):
+    try:
+        tts = gTTS(text=text, lang='ja')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        st.audio(fp, format='audio/mp3')
+    except Exception as e:
+        st.warning("音声の生成に失敗しました。")
 
-# --- 3. セッション状態（State）の初期化 ---
+# --- 4. セッション状態（State）の初期化 ---
 if "quiz_started" not in st.session_state:
     st.session_state.quiz_started = False
 if "current_index" not in st.session_state:
@@ -72,15 +78,14 @@ if "wrong_list" not in st.session_state:
 st.title("🏥 介護用語学習アプリ")
 st.subheader("外国人スタッフ向け クイズ＆サポート")
 
-# フォームを表示するかどうかを判定するフラグ（初期値はFalse）
 show_form = False
 
-# --- 4. メインコンテンツ（クイズ制御） ---
+# --- 5. メインコンテンツ（クイズ制御） ---
 
 # 【画面A】問題数選択画面（初期状態）
 if not st.session_state.quiz_started:
     st.write("日本の介護現場でよく使う言葉を勉強しましょう。")
-    show_form = True  # 最初はフォームを表示する
+    show_form = True  
     
     max_questions = len(df)
     options = [5, 10, 20, 30]
@@ -100,20 +105,31 @@ if not st.session_state.quiz_started:
         st.session_state.wrong_list = []
         st.rerun()
 
-# 【画面B】クイズ進行中 ＆ 終了結果画面
+# 【画面B】クイズ進行中
 else:
     quiz_list = st.session_state.quiz_data
     total_q = len(quiz_list)
     current_idx = st.session_state.current_index
 
-    # クイズがまだ残っている場合
     if current_idx < total_q:
         st.markdown(f"### 📝 問題 {current_idx + 1} / {total_q}")
         row = quiz_list[current_idx]
         
         st.info(f"「**{row['用語']}**」の意味は何ですか？")
+        
+        # 音声再生ボタン（問題の用語を読み上げる）
+        st.write("🔊 用語のよみをきく：")
+        play_audio(row['用語'])
+        
+        # やさしい日本語の表示（列名の揺れに対応）
+        display_easy_ja = ""
         if 'やさしい日本語' in row and pd.notna(row['やさしい日本語']):
-            st.caption(f"💡 やさしいにほんご：{row['やさしい日本語']}")
+            display_easy_ja = row['やさしい日本語']
+        elif 'やさしいにほんご' in row and pd.notna(row['やさしいにほんご']):
+            display_easy_ja = row['やさしいにほんご']
+            
+        if display_easy_ja:
+            st.caption(f"💡 やさしいにほんご：{display_easy_ja}")
             
         choices = [row['正しい意味'], row['不正解1'], row['不正解2']]
         random.seed(current_idx)
@@ -142,7 +158,7 @@ else:
     # 【画面C】全問終了・リザルト画面
     else:
         st.markdown("### 🏁 クイズ終了！")
-        show_form = True  # 終了時もフォームを表示する
+        show_form = True  
         score = st.session_state.score
         st.metric(label="あなたの正解数", value=f"{score} / {total_q}")
         
@@ -163,7 +179,7 @@ else:
             st.session_state.quiz_started = False
             st.rerun()
 
-# --- 5. 提案・相談フォーム（条件付き表示） ---
+# --- 6. 提案・相談フォーム（条件付き表示 ＆ デバッグメッセージ付き） ---
 if show_form:
     st.write("---")
     st.subheader("💬 アプリへの提案や、業務・生活の相談窓口")
@@ -187,8 +203,26 @@ if show_form:
                 st.error("⚠️ 「仕事、生活の相談」の場合は、必ずあなたのお名前を入力してください。")
             else:
                 final_name = name.strip() if name.strip() else "匿名"
-                success = save_consultation(final_name, category, content)
+                
+                # スプレッドシートへの保存を試みる
+                success, message = save_consultation(final_name, category, content)
+                
                 if success:
-                    st.success("⭕ 送信ありがとうございました！管理者に届けられました。")
+                    st.success(f"⭕ {message}")
                 else:
-                    st.error("❌ 送信に失敗しました。時間をおいて再度お試しください。")
+                    # スプレッドシートに反映されなかった場合、画面に原因（エラー文）を表示する
+                    st.warning(f"ℹ️ {message}")
+                    
+                    # バックアップとしてローカルCSVに書き込み
+                    csv_file = "consultations.csv"
+                    columns = ["タイムスタンプ", "名前（ニックネーム）", "内容の種類", "具体的な内容"]
+                    new_data = [[datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), final_name, category, content]]
+                    
+                    if os.path.exists(csv_file):
+                        consult_df = pd.read_csv(csv_file)
+                    else:
+                        consult_df = pd.DataFrame(columns=columns)
+                    
+                    new_row = pd.DataFrame(new_data, columns=columns)
+                    consult_df = pd.concat([consult_df, new_row], ignore_index=True)
+                    consult_df.to_csv(csv_file, index=False)
