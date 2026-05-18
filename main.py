@@ -1,217 +1,134 @@
 import streamlit as st
 import pandas as pd
 import random
-import datetime
-import os
 from gtts import gTTS
 import io
 
-# Googleスプレッドシート連携用ライブラリの読み込み
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-    GSPREAD_AVAILABLE = True
-except ImportError:
-    GSPREAD_AVAILABLE = False
+# --- 1. 音声読み上げ用の関数（gTTS版：最も確実です） ---
+def speak_text(text):
+    # Googleの音声合成を使って音声データを作成
+    tts = gTTS(text=text, lang='ja')
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    # Streamlit標準のオーディオプレイヤーで再生（自動再生をオンに）
+    st.audio(fp, format='audio/mp3', autoplay=True)
 
-# --- 1. データの読み込み ---
+# --- 2. 初期設定とデータ読み込み ---
+if "wrong_list" not in st.session_state:
+    st.session_state.wrong_list = []
+
+st.set_page_config(page_title="介護用語トレーニング", layout="centered")
+
 @st.cache_data
 def load_data():
     return pd.read_csv("data.csv")
 
-try:
-    df = load_data()
-    # 列名の表記揺れ対策（「やさしい日本語」でも「やさしいにほんご」でも動くようにする）
-    df.columns = [col.strip() for col in df.columns]
-    if 'やさしいにほんご' in df.columns and 'やさしい日本語' not in df.columns:
-        df = df.rename(columns={'やさしいにほんご': 'やさしい日本語'})
-except Exception as e:
-    st.error("data.csv が見つからないか、形式が正しくありません。")
+all_df = load_data()
+
+# セッション状態の初期化
+if 'quiz_data' not in st.session_state:
+    st.session_state.quiz_data = None
+    st.session_state.index = 0
+    st.session_state.answered = False
+    st.session_state.correct_count = 0
+    st.session_state.current_options = []
+    st.session_state.max_questions = 0
+
+# --- 3. 出題数選択画面 ---
+if st.session_state.quiz_data is None:
+    st.title("🏥 介護用語クイズ")
+    st.subheader("今日は何問解きますか？")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("10問"):
+            st.session_state.max_questions = 10
+    with col2:
+        if st.button("20問"):
+            st.session_state.max_questions = 20
+    with col3:
+        if st.button("30問"):
+            st.session_state.max_questions = 30
+            
+    if st.session_state.max_questions > 0:
+        num = min(st.session_state.max_questions, len(all_df))
+        st.session_state.quiz_data = all_df.sample(n=num).reset_index(drop=True)
+        st.rerun()
     st.stop()
 
-# --- 2. スプレッドシート（またはローカルCSV）への書き込み関数 ---
-def save_consultation(name, category, content):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_data = [timestamp, name, category, content]
-
-    try:
-        if GSPREAD_AVAILABLE and "gcp_service_account" in st.secrets:
-            scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-            gc = gspread.authorize(credentials)
-            
-            # 【重要】スプレッドシート名を「相談・提案窓口」に変更
-            workbook = gc.open("相談・提案窓口")
-            # 一番最初のワークシートを指定
-            worksheet = workbook.get_worksheet(0)
-            
-            worksheet.append_row(new_data)
-            return True, "スプレッドシートへの保存に成功しました！"
-        else:
-            return False, "Streamlit Secretsに認証情報（gcp_service_account）が見つかりません。Secretsの設定を確認してください。"
-    except Exception as e:
-        # エラーの原因を分かりやすく画面に返す
-        return False, f"スプレッドシート接続エラー: {str(e)}"
-
-# --- 3. 音声生成・再生関数 ---
-def play_audio(text):
-    try:
-        tts = gTTS(text=text, lang='ja')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        st.audio(fp, format='audio/mp3')
-    except Exception as e:
-        st.warning("音声の生成に失敗しました。")
-
-# --- 4. セッション状態（State）の初期化 ---
-if "quiz_started" not in st.session_state:
-    st.session_state.quiz_started = False
-if "current_index" not in st.session_state:
-    st.session_state.current_index = 0
-if "score" not in st.session_state:
-    st.session_state.score = 0
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = []
-if "wrong_list" not in st.session_state:
-    st.session_state.wrong_list = []
-
-# タイトルエリア（常時表示）
-st.title("🏥 介護用語学習アプリ")
-st.subheader("外国人スタッフ向け クイズ＆サポート")
-
-# 相談フォームを表示するかどうかのフラグ
-show_form = False
-
-# --- 5. メインコンテンツ（クイズ制御） ---
-
-# 【画面A】問題数選択画面（初期状態）
-if not st.session_state.quiz_started:
-    st.write("日本の介護現場でよく使う言葉を勉強しましょう。")
-    show_form = True  # 最初の画面ではフォームを表示
+# --- 4. 全問題終了後の画面 ---
+df = st.session_state.quiz_data
+if st.session_state.index >= len(df):
+    st.balloons()
+    st.header("🎉 終了！")
+    st.subheader(f"正解数: {st.session_state.correct_count} / {len(df)}")
     
-    max_questions = len(df)
-    options = [5, 10, 20, 30]  # 問題数の選択肢を30問までに制限
-    options = [opt for opt in options if opt <= max_questions]
-    if not options:
-        options = [max_questions]
-    
-    num_choice = st.selectbox("何問クイズに挑戦しますか？", options)
-    
-    if st.button("クイズを始める 🚀", use_container_width=True):
-        num_to_sample = int(num_choice)
-        sampled_df = df.sample(n=num_to_sample).reset_index(drop=True)
-        st.session_state.quiz_data = sampled_df.to_dict(orient="records")
-        st.session_state.quiz_started = True
-        st.session_state.current_index = 0
-        st.session_state.score = 0
-        st.session_state.wrong_list = []
-        st.rerun()
-
-# 【画面B】クイズ進行中
-else:
-    quiz_list = st.session_state.quiz_data
-    total_q = len(quiz_list)
-    current_idx = st.session_state.current_index
-
-    if current_idx < total_q:
-        st.markdown(f"### 📝 問題 {current_idx + 1} / {total_q}")
-        row = quiz_list[current_idx]
-        
-        st.info(f"「**{row['用語']}**」の意味は何ですか？")
-        
-        # 音声再生ボタン（復活）
-        st.write("🔊 用語のよみをきく：")
-        play_audio(row['用語'])
-        
-        # やさしい日本語の表示ロジック（復活）
-        display_easy_ja = ""
-        if 'やさしい日本語' in row and pd.notna(row['やさしい日本語']):
-            display_easy_ja = row['やさしい日本語']
-        elif 'やさしいにほんご' in row and pd.notna(row['やさしいにほんご']):
-            display_easy_ja = row['やさしいにほんご']
-            
-        if display_easy_ja:
-            st.caption(f"💡 やさしいにほんご：{display_easy_ja}")
-            
-        choices = [row['正しい意味'], row['不正解1'], row['不正解2']]
-        random.seed(current_idx)
-        random.shuffle(choices)
-        
-        with st.form(key=f"quiz_form_{current_idx}"):
-            answer = st.radio("答えを選んでください：", choices)
-            submit = st.form_submit_button("回答を確定する")
-            
-            if submit:
-                if answer == row['正しい意味']:
-                    st.success("⭕ 正解（Benar）！")
-                    st.session_state.score += 1
-                else:
-                    st.error(f"❌ 不正解... 正解は「{row['正しい意味']}」です。")
-                    st.session_state.wrong_list.append(row['用語'])
-                    
-                if '解説' in row and pd.notna(row['解説']):
-                    st.write(f"📖 **解説:** {row['解説']}")
-                if 'インドネシア語' in row and pd.notna(row['インドネシア語']):
-                    st.write(f"🇮🇩 **Bahasa Indonesia:** {row['インドネシア語']}")
-                
-                st.session_state.current_index += 1
-                st.form_submit_button("次の問題へ ➡️")
-
-    # 【画面C】全問終了・リザルト画面
+    st.write("---")
+    st.subheader("🚩 苦手克服リスト")
+    if st.session_state.wrong_list:
+        for q in st.session_state.wrong_list:
+            st.write(f"・ **{q}**")
     else:
-        st.markdown("### 🏁 クイズ終了！")
-        show_form = True  # クイズ終了画面でもフォームを表示
-        score = st.session_state.score
-        st.metric(label="あなたの正解数", value=f"{score} / {total_q}")
-        
-        accuracy = (score / total_q) * 100
-        if accuracy == 100:
-            st.balloons()
-            st.success("素晴らしい！完璧です！💯")
-        elif accuracy >= 70:
-            st.success("よくできました！その調子です！✨")
+        st.success("完璧です！")
+
+    if st.button("メニューに戻る"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+    st.stop()
+
+# --- 5. クイズ画面 ---
+row = df.iloc[st.session_state.index]
+
+st.title("🏥 介護用語クイズ")
+st.progress(st.session_state.index / len(df))
+st.write(f"進捗: {st.session_state.index + 1} / {len(df)} 問目")
+
+st.info(f"「**{row['用語']}**」はどういう意味ですか？")
+
+# ボタン部分：gTTSで音声を生成して再生
+if st.button("🔊 用語を読み上げる"):
+    speak_text(row['用語'])
+
+if not st.session_state.answered and not st.session_state.current_options:
+    options = [row['正しい意味'], row['不正解1'], row['不正解2']]
+    random.shuffle(options)
+    st.session_state.current_options = options
+
+choice = st.radio("答えを選んでください：", st.session_state.current_options, index=None, key=f"q_{st.session_state.index}")
+
+if not st.session_state.answered:
+    if st.button("回答する"):
+        if choice is None:
+            st.warning("選択肢を選んでください！")
         else:
-            st.warning("もう一度復習してみましょう！📖")
-            
-        if st.session_state.wrong_list:
-            st.write("🔺 **間違えた単語（もう一度確認しましょう）:**")
-            st.write(", ".join(st.session_state.wrong_list))
-                        
-        if st.button("もう一度最初から遊ぶ 🔄", use_container_width=True):
-            st.session_state.quiz_started = False
+            st.session_state.answered = True
             st.rerun()
 
-# --- 6. 提案・相談フォーム（条件付き表示） ---
-if show_form:
-    st.write("---")
-    st.subheader("💬 アプリへの提案や、業務・生活の相談窓口")
-    st.write("日本の生活や仕事で困っていること、アプリへの要望があれば教えてください。")
-    st.caption("※「仕事、生活の相談」以外は、匿名（名前なし）でも送信できます。")
+# --- 6. 回答後の処理 ---
+if st.session_state.answered:
+    if choice == row['正しい意味']:
+        st.success("⭕ 正解です！")
+        if 'last_counted' not in st.session_state or st.session_state.last_counted != st.session_state.index:
+            st.session_state.correct_count += 1
+            st.session_state.last_counted = st.session_state.index
+    else:
+        st.error(f"❌ 残念！ 正解は： **{row['正しい意味']}**")
+        if row['用語'] not in st.session_state.wrong_list:
+            st.session_state.wrong_list.append(row['用語'])
 
-    with st.form(key="consultation_form", clear_on_submit=True):
-        category = st.selectbox(
-            "内容の種類を選んでください", 
-            ["アプリに関すること", "仕事、生活の相談", "その他"]
-        )
-        name = st.text_input("お名前（ニックネーム）")
-        content = st.text_area("具体的な内容（必須）")
-        
-        submit_consult = st.form_submit_button(label="送信する")
-        
-        if submit_consult:
-            if not content.strip():
-                st.error("❌ 具体的な内容を入力してください。")
-            elif category == "仕事、生活の相談" and not name.strip():
-                st.error("⚠️ 「仕事、生活の相談」の場合は、必ずあなたのお名前を入力してください。")
-            else:
-                final_name = name.strip() if name.strip() else "匿名"
-                
-                # スプレッドシートへの保存を実行
-                success, message = save_consultation(final_name, category, content)
-                
-                if success:
-                    st.success(f"⭕ {message}")
-                else:
-                    # 失敗した場合はエラー原因を画面にオレンジ色で表示する
-                    st.warning(f"⚠️ {message}")
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("**【やさしい日本語】**\n\n" + str(row['やさしい日本語']))
+    with col2:
+        st.success("**【Bahasa Indonesia】**\n\n" + str(row['インドネシア語']))
+    
+    st.write("**【くわしい解説】**")
+    st.write(row['解説'])
+
+    if st.button("次の問題へ ➡️"):
+        st.session_state.index += 1
+        st.session_state.answered = False
+        st.session_state.current_options = []
+        st.rerun()
